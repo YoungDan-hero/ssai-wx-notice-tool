@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 APP_DIR = Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
 APP_NAME = "SSAI-WX 通知小工具"
-APP_VERSION = "V1.0.4"
+APP_VERSION = "V1.0.5"
 CONTACT_WECHAT = "sanshengya88"
 
 
@@ -348,6 +348,26 @@ def focus_wechat_input(click_point: str) -> None:
         y = int(float(y_text.strip()))
     except ValueError as exc:
         raise RuntimeError(f"无法获取微信输入框点击位置：{click_point}") from exc
+    if sys.platform == "darwin":
+        try:
+            from Quartz import (
+                CGEventCreateMouseEvent,
+                CGEventPost,
+                kCGEventLeftMouseDown,
+                kCGEventLeftMouseUp,
+                kCGHIDEventTap,
+                kCGMouseButtonLeft,
+            )
+
+            down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, (x, y), kCGMouseButtonLeft)
+            up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, (x, y), kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, down)
+            time.sleep(0.05)
+            CGEventPost(kCGHIDEventTap, up)
+            return
+        except Exception as exc:
+            raise RuntimeError(f"无法点击微信输入框，请检查辅助功能权限：{exc}") from exc
+
     try:
         pyautogui = require_module("pyautogui")
         pyautogui.click(x=x, y=y)

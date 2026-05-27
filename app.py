@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WX notification helper for already-split WeChat windows on macOS."""
+"""WX notification helper for already-split WeChat windows."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import os
 import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -41,7 +42,7 @@ from PySide6.QtWidgets import (
 APP_DIR = Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
 APP_NAME = "SSAI-WX 通知小工具"
-APP_VERSION = "V1.0.1"
+APP_VERSION = "V1.0.2"
 CONTACT_WECHAT = "sanshengya88"
 
 
@@ -63,7 +64,8 @@ SUPPORTED_IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".heic", "
 SUPPORTED_VIDEOS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 SUPPORTED_MEDIA = SUPPORTED_IMAGES | SUPPORTED_VIDEOS
 SUPPORTED_DOCUMENTS = {".txt", ".docx", ".doc"}
-WECHAT_PROCESS_NAMES = ("WeChat", "微信")
+WECHAT_PROCESS_NAMES = ("WeChat", "微信", "Weixin")
+WINDOWS_WECHAT_EXECUTABLES = {"wechat.exe", "weixin.exe"}
 GENERIC_WECHAT_WINDOW_TITLES = {"微信", "WeChat"}
 JOB_START_DELAY_MS = 500
 JOB_COOLDOWN_MIN_MS = 1400
@@ -136,6 +138,10 @@ def escape_applescript_text(value: str) -> str:
 
 
 def detect_wechat_process() -> str | None:
+    if sys.platform == "win32":
+        windows = list_wechat_windows()
+        return windows[0].process_name if windows else None
+
     for process_name in WECHAT_PROCESS_NAMES:
         script = f'tell application "System Events" to exists process "{process_name}"'
         try:
@@ -146,7 +152,62 @@ def detect_wechat_process() -> str | None:
     return None
 
 
+def get_windows_process_name(hwnd: int) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    pid = wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return ""
+
+    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not handle:
+        return ""
+    try:
+        buffer = ctypes.create_unicode_buffer(260)
+        size = wintypes.DWORD(len(buffer))
+        if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return Path(buffer.value).name
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+    return ""
+
+
+def list_windows_wechat_windows() -> list[WeChatWindow]:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    windows: list[WeChatWindow] = []
+    enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        title_buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, title_buffer, length + 1)
+        title = title_buffer.value.strip()
+        if not title or title in GENERIC_WECHAT_WINDOW_TITLES:
+            return True
+        process_name = get_windows_process_name(hwnd)
+        if process_name.lower() not in WINDOWS_WECHAT_EXECUTABLES:
+            return True
+        windows.append(WeChatWindow(process_name, int(hwnd), title))
+        return True
+
+    user32.EnumWindows(enum_windows_proc(callback), 0)
+    return windows
+
+
 def list_wechat_windows() -> list[WeChatWindow]:
+    if sys.platform == "win32":
+        return list_windows_wechat_windows()
+
     windows: list[WeChatWindow] = []
     for process_name in WECHAT_PROCESS_NAMES:
         script = f'''
@@ -193,7 +254,22 @@ return ""
     return windows
 
 
+def raise_windows_window(hwnd: int) -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    SW_RESTORE = 9
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    time.sleep(0.1)
+    if not user32.SetForegroundWindow(hwnd):
+        raise RuntimeError("无法激活微信窗口，请先手动点击一次微信窗口后重试。")
+
+
 def raise_wechat_window(window: WeChatWindow) -> None:
+    if sys.platform == "win32":
+        raise_windows_window(window.index)
+        return
+
     process_name = escape_applescript_text(window.process_name)
     script = f'''
 tell application "{process_name}" to activate
@@ -213,15 +289,58 @@ end tell
 
 
 def set_text_clipboard(text: str) -> None:
+    if sys.platform == "win32":
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError as exc:
+            raise MissingDependency("缺少依赖 pywin32。请先安装项目依赖。") from exc
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+        finally:
+            win32clipboard.CloseClipboard()
+        return
+
     subprocess.run(["pbcopy"], input=text, text=True, check=True)
 
 
 def clear_clipboard() -> None:
+    if sys.platform == "win32":
+        try:
+            import win32clipboard
+        except ImportError as exc:
+            raise MissingDependency("缺少依赖 pywin32。请先安装项目依赖。") from exc
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+        finally:
+            win32clipboard.CloseClipboard()
+        return
+
     subprocess.run(["pbcopy"], input="", text=True, check=True)
 
 
 def set_files_clipboard(paths: Iterable[Path]) -> None:
     path_list = list(paths)
+    if sys.platform == "win32":
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError as exc:
+            raise MissingDependency("缺少依赖 pywin32。请先安装项目依赖。") from exc
+        file_list = "\0".join(str(path.resolve()) for path in path_list) + "\0\0"
+        dropfiles = struct.pack("IiiII", 20, 0, 0, 0, 1)
+        clipboard_data = dropfiles + file_list.encode("utf-16le")
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, clipboard_data)
+        finally:
+            win32clipboard.CloseClipboard()
+        return
+
     try:
         require_module("AppKit", "pyobjc-framework-Cocoa")
         from AppKit import NSPasteboard, NSURL
@@ -240,6 +359,13 @@ def set_files_clipboard(paths: Iterable[Path]) -> None:
 
 
 def press_paste_and_enter() -> None:
+    if sys.platform == "win32":
+        pyautogui = require_module("pyautogui")
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.35)
+        pyautogui.press("enter")
+        return
+
     run_osascript(
         '''
 tell application "System Events"
@@ -1856,8 +1982,8 @@ class MainWindow(QWidget):
 
 
 def main() -> int:
-    if sys.platform != "darwin":
-        print("此工具第一版仅支持 macOS。")
+    if sys.platform not in {"darwin", "win32"}:
+        print("此工具仅支持 macOS 和 Windows。")
         return 1
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)

@@ -4,7 +4,7 @@
 
 ![SSAI-WX 通知小工具界面预览](docs/app-screenshot.png)
 
-- 版本：V1.0.1
+- 版本：V1.0.2
 - 联系方式：微信 sanshengya88
 
 它不会调用微信接口，也不会自动搜索群聊。你需要先在微信里把目标群聊拆成独立窗口，工具会按检测到的窗口列表连续发送。
@@ -51,11 +51,14 @@ packaging/macos/build_macos.sh
 release/macos/
 ```
 
-Windows 版当前还需要先实现 Windows 后端，说明见：
+Windows 打包可在 Windows 项目根目录运行：
 
-```text
-packaging/windows/README.md
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+packaging\windows\build_windows.ps1
 ```
+
+打包结果会输出到 `dist\SSAI-WX-Notice-Tool\`。更多说明见 `packaging/windows/README.md`。
 
 ## macOS 权限
 

@@ -1,28 +1,40 @@
 # Windows 打包说明
 
-当前版本仍是 macOS 专用版本，Windows 安装包暂未生成。
+本项目的 Windows 版使用 PyInstaller 打包，输出为免安装目录。
 
-原因：
+## 打包环境
 
-- `app.py` 启动时限制 `sys.platform == "darwin"`。
-- 微信窗口检测使用 macOS AppleScript。
-- 激活窗口使用 macOS 辅助功能。
-- 剪贴板文件复制使用 macOS AppKit / Pasteboard。
-- 粘贴和回车发送使用 macOS `System Events`。
+- Windows 10/11
+- Python 3.11 或更新版本
+- 已安装并登录 Windows 微信客户端
 
-Windows 版需要先实现 Windows 后端：
+## 打包命令
 
-- 窗口检测：`pywinauto` / Win32 API。
-- 激活窗口：Win32 窗口句柄。
-- 文本剪贴板：`pyperclip` 或 `win32clipboard`。
-- 文件剪贴板：Windows `CF_HDROP`。
-- 粘贴发送：`pyautogui.hotkey("ctrl", "v")` + `press("enter")` 或 `pywinauto`。
-
-已预留脚本：
+在项目根目录运行：
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 packaging\windows\build_windows.ps1
 ```
 
-等 Windows 后端实现后，需要在 Windows 机器上运行该脚本生成 `.exe`，再接 Inno Setup 或 NSIS 生成安装包。
+打包结果输出到：
 
+```text
+dist\SSAI-WX-Notice-Tool\
+```
+
+可执行文件为：
+
+```text
+dist\SSAI-WX-Notice-Tool\SSAI-WX-Notice-Tool.exe
+```
+
+## 使用说明
+
+1. 打开并登录 Windows 微信客户端。
+2. 将要通知的群聊拆分成独立聊天窗口。
+3. 启动 `SSAI-WX-Notice-Tool.exe`。
+4. 点击“刷新窗口”，确认右侧列表只包含本次要发送的窗口。
+5. 输入文字或添加图片、文档后点击“同步发送”。
+
+Windows 版会枚举当前可见的微信独立窗口，通过系统剪贴板粘贴内容，并模拟 `Ctrl+V` 和回车发送。
